@@ -4,13 +4,21 @@ from newspaper import Article, Config
 from datetime import datetime
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="Market Intelligence", layout="wide")
+# "collapsed" ensures the sidebar is closed when the user loads the page
+st.set_page_config(page_title="Market Intelligence", layout="wide", initial_sidebar_state="collapsed")
 
-# --- THE INTERCEPT STYLE CSS & WATERMARK ---
+# --- THE INTERCEPT STYLE CSS & GHOST MODE ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Merriweather:wght@300;400;700&display=swap');
 
+    /* --- GHOST MODE: SIDEBAR TOGGLE --- */
+    /* This targets the expand/collapse button in the top left */
+    [data-testid="stSidebarCollapsedControl"] {
+        opacity: 0 !important; /* Makes it invisible */
+        transition: opacity 0.3s;
+    }
+    
     /* --- TYPOGRAPHY --- */
     h1, h2, h3 {
         font-family: 'Oswald', sans-serif !important;
@@ -104,22 +112,23 @@ st.markdown("""
         bottom: 0px;
         right: 20px;
         padding: 8px 15px;
-        background-color: #000000; /* Black background */
+        background-color: #000000;
         color: white;
         font-family: 'Oswald', sans-serif;
         font-size: 0.75rem;
         font-weight: bold;
         text-transform: uppercase;
         letter-spacing: 1px;
-        z-index: 99999; /* Ensures it sits on top of everything */
-        pointer-events: none; /* Allows clicking through it if necessary */
+        z-index: 99999;
+        pointer-events: none;
         border-top-left-radius: 0px;
         border-top-right-radius: 0px;
     }
     
-    /* HIDE STREAMLIT UI ELEMENTS */
+    /* HIDE DEFAULT MENU & FOOTER */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
+    header {visibility: hidden;} 
     
     section[data-testid="stSidebar"] {
         background-color: #f9f9f9;
@@ -148,13 +157,28 @@ def fetch_news(api_key, topic, scope):
     }
 
     if scope == "Australian Sources":
-        # Major AU Domains
-        au_domains = (
-            "abc.net.au,sbs.com.au,smh.com.au,theage.com.au,news.com.au,"
-            "9news.com.au,theguardian.com,afr.com,dailytelegraph.com.au,"
-            "heraldsun.com.au,couriermail.com.au,wa.today,brisbanetimes.com.au"
-        )
-        params["domains"] = au_domains
+        # Updated Comprehensive AU Domains List
+        # Note: Domains must be comma-separated with no spaces
+        au_domains_list = [
+            "abc.net.au", "skynews.com.au", "news.com.au", "9news.com.au",
+            "dailytelegraph.com.au", "smh.com.au", "theage.com.au", "sbs.com.au",
+            "heraldsun.com.au", "thegcminute.com.au", "cairnsnews.org",
+            "canberratimes.com.au", "goldcoastbulletin.com.au", "businessnews.com.au",
+            "tasmaniantimes.com", "alicespringsnews.com.au", "sydneysun.com",
+            "perthnow.com.au", "brisbanetimes.com.au", "watoday.com.au", "afr.com",
+            "theaustralian.com.au", "adelaidenow.com.au", "ntnews.com.au",
+            "themercury.com.au", "examiner.com.au", "bordermail.com.au",
+            "illawarramercury.com.au", "newcastleherald.com.au", "geelongadvertiser.com.au",
+            "bendigoadvertiser.com.au", "thecourier.com.au", "standard.net.au",
+            "theadvocate.com.au", "northerndailyleader.com.au", "dailyadvertiser.com.au",
+            "couriermail.com.au", "morningbulletin.com.au", "gladstoneobserver.com.au",
+            "frasercoastchronicle.com.au", "sunshinecoastdaily.com.au", "gympietimes.com.au",
+            "tweeddailynews.com.au", "northernstar.com.au", "dailymercury.com.au",
+            "theguardian.com" # Major AU presence, often redirects to .com/au
+        ]
+        
+        # Join list into a single string: "abc.net.au,skynews.com.au,..."
+        params["domains"] = ",".join(au_domains_list)
 
     try:
         response = requests.get(base_url, params=params)
@@ -196,7 +220,6 @@ def summarize_with_google_rest(text_content, api_key):
 def extract_and_summarize(article_url, google_api_key):
     """Extracts text and passes it to the summarizer."""
     
-    # Mask User Agent to bypass soft blockers
     user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     
     config = Config()
@@ -230,8 +253,6 @@ def format_date(date_str):
 with st.sidebar:
     st.markdown("### SYSTEM CONFIG")
     
-    # --- SECRETS MANAGEMENT LOGIC ---
-    # Check if keys exist in the secure server secrets
     if "NEWS_API_KEY" in st.secrets:
         news_api_key = st.secrets["NEWS_API_KEY"]
         st.success("✅ NEWS API KEY LOADED")
@@ -251,7 +272,7 @@ with st.sidebar:
 st.title("THE BRIEFING")
 st.markdown("### LIVE NEWS INTELLIGENCE FEED")
 
-# --- ROW 1: Search Inputs (Perfectly Aligned) ---
+# --- ROW 1: Search Inputs ---
 col1, col2 = st.columns([4, 1], vertical_alignment="bottom")
 
 with col1:
