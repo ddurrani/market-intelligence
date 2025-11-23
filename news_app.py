@@ -13,12 +13,24 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Merriweather:wght@300;400;700&display=swap');
 
     /* --- GHOST MODE: SIDEBAR TOGGLE --- */
-    /* This targets the expand/collapse button in the top left */
+    /* We hide the button normally, but show it when you hover over the top-left corner */
     [data-testid="stSidebarCollapsedControl"] {
-        opacity: 0 !important; /* Makes it invisible */
-        transition: opacity 0.3s;
+        opacity: 0; /* Invisible by default */
+        transition: opacity 0.3s ease;
     }
     
+    /* When mouse hovers over the button, make it fully visible */
+    [data-testid="stSidebarCollapsedControl"]:hover {
+        opacity: 1 !important;
+        background-color: #f0f0f0;
+    }
+
+    /* --- HIDE ONLY THE RAINBOW DECORATION --- */
+    /* This keeps the header (buttons) visible, but removes the colorful line */
+    [data-testid="stDecoration"] {
+        display: none;
+    }
+
     /* --- TYPOGRAPHY --- */
     h1, h2, h3 {
         font-family: 'Oswald', sans-serif !important;
@@ -128,7 +140,6 @@ st.markdown("""
     /* HIDE DEFAULT MENU & FOOTER */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden;} 
     
     section[data-testid="stSidebar"] {
         background-color: #f9f9f9;
@@ -158,7 +169,6 @@ def fetch_news(api_key, topic, scope):
 
     if scope == "Australian Sources":
         # Updated Comprehensive AU Domains List
-        # Note: Domains must be comma-separated with no spaces
         au_domains_list = [
             "abc.net.au", "skynews.com.au", "news.com.au", "9news.com.au",
             "dailytelegraph.com.au", "smh.com.au", "theage.com.au", "sbs.com.au",
@@ -174,10 +184,9 @@ def fetch_news(api_key, topic, scope):
             "couriermail.com.au", "morningbulletin.com.au", "gladstoneobserver.com.au",
             "frasercoastchronicle.com.au", "sunshinecoastdaily.com.au", "gympietimes.com.au",
             "tweeddailynews.com.au", "northernstar.com.au", "dailymercury.com.au",
-            "theguardian.com" # Major AU presence, often redirects to .com/au
+            "theguardian.com"
         ]
         
-        # Join list into a single string: "abc.net.au,skynews.com.au,..."
         params["domains"] = ",".join(au_domains_list)
 
     try:
