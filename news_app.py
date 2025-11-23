@@ -7,17 +7,19 @@ from datetime import datetime
 st.set_page_config(page_title="Market Intelligence", layout="wide", initial_sidebar_state="collapsed")
 
 # --- SESSION STATE ---
+# We use this to hold the data in memory so we don't have to re-fetch it
 if 'all_articles' not in st.session_state:
     st.session_state.all_articles = []
 if 'visible_count' not in st.session_state:
     st.session_state.visible_count = 20
+if 'search_performed' not in st.session_state:
+    st.session_state.search_performed = False
 
 # --- THE INTERCEPT STYLE CSS & GHOST MODE ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Merriweather:wght@300;400;700&display=swap');
 
-    /* --- GHOST MODE: SIDEBAR TOGGLE --- */
     [data-testid="stSidebarCollapsedControl"] {
         opacity: 0; 
         transition: opacity 0.3s ease;
@@ -29,7 +31,6 @@ st.markdown("""
 
     [data-testid="stDecoration"] { display: none; }
 
-    /* --- TYPOGRAPHY --- */
     h1, h2, h3 {
         font-family: 'Oswald', sans-serif !important;
         text-transform: uppercase;
@@ -57,7 +58,6 @@ st.markdown("""
         margin-top: 5px;
     }
 
-    /* --- INPUT FIELDS --- */
     .stTextInput input {
         border: 2px solid black !important;
         border-radius: 0px !important;
@@ -72,20 +72,14 @@ st.markdown("""
         box-shadow: none !important;
     }
     
-    /* --- RADIO BUTTONS --- */
     .stRadio label {
         font-family: 'Oswald', sans-serif !important;
         font-size: 1rem !important;
         color: black !important;
     }
-    div[data-testid="stRadio"] {
-        margin-top: -15px;
-    }
-    div[data-testid="stRadio"] > div {
-        background-color: transparent;
-    }
+    div[data-testid="stRadio"] { margin-top: -15px; }
+    div[data-testid="stRadio"] > div { background-color: transparent; }
     
-    /* --- BUTTONS --- */
     .stButton > button {
         border: 2px solid black !important;
         border-radius: 0px !important;
@@ -98,16 +92,13 @@ st.markdown("""
         margin-top: 0px;
         width: 100%;
     }
-    
     .stButton > button p { color: #ffffff !important; }
-
     .stButton > button:hover {
         background-color: #ffffff !important;
         color: #000000 !important;
     }
     .stButton > button:hover p { color: #000000 !important; }
 
-    /* --- EXPANDER --- */
     .streamlit-expanderHeader {
         font-family: 'Oswald', sans-serif;
         font-weight: bold;
@@ -116,7 +107,6 @@ st.markdown("""
         background-color: #f4f4f4;
     }
     
-    /* --- WATERMARK --- */
     .watermark {
         position: fixed;
         bottom: 0px;
@@ -149,8 +139,7 @@ st.markdown("""
 
 def fetch_news(api_key, topic, scope):
     """
-    Fetches up to 100 articles in one go.
-    We store these in session state and only display chunks of 20.
+    Fetches 100 articles and performs DE-DUPLICATION.
     """
     base_url = "https://newsapi.org/v2/everything"
     
@@ -158,7 +147,7 @@ def fetch_news(api_key, topic, scope):
         "q": topic,
         "sortBy": "publishedAt",
         "language": "en",
-        "pageSize": 100,  # Grab maximum allowed by free tier
+        "pageSize": 100, # Fetch max allowed
         "apiKey": api_key
     }
 
@@ -185,7 +174,22 @@ def fetch_news(api_key, topic, scope):
     try:
         response = requests.get(base_url, params=params)
         response.raise_for_status()
-        return response.json().get("articles", [])
+        raw_articles = response.json().get("articles", [])
+        
+        # --- DE-DUPLICATION LOGIC ---
+        # Many news sites publish identical stories. We filter by Title to ensure uniqueness.
+        unique_articles = []
+        seen_titles = set()
+        
+        for art in raw_articles:
+            # Normalize title string to catch near-duplicates
+            title_clean = art['title'].strip().lower()
+            if title_clean not in seen_titles:
+                unique_articles.append(art)
+                seen_titles.add(title_clean)
+        
+        return unique_articles
+
     except Exception as e:
         st.error(f"Error fetching news: {e}")
         return []
@@ -242,54 +246,62 @@ st.markdown("---")
 
 # --- MAIN LOGIC ---
 
-# 1. NEW SEARCH: Fetch 100 articles, Reset visible count to 20
+# 1. NEW SEARCH: Fetch 100 unique articles, Reset visible count to 20
 if search_pressed:
     if not news_api_key or not google_api_key:
         st.warning("⚠️ ACCESS DENIED: KEYS NOT FOUND.")
     elif not topic:
         st.warning("⚠️ INPUT ERROR: PLEASE ENTER A TOPIC.")
     else:
-        st.session_state.visible_count = 20 # Reset visibility
+        # Reset State for New Search
+        st.session_state.visible_count = 20
+        st.session_state.all_articles = []
+        st.session_state.search_performed = True
+        
         scope_text = "AUSTRALIAN WIRES" if source_scope == "Australian Sources" else "GLOBAL WIRES"
         
         with st.spinner(f"SCANNING {scope_text} FOR '{topic.upper()}'..."):
-            # This grabs up to 100 items and stores them all
             fetched = fetch_news(news_api_key, topic, source_scope)
             st.session_state.all_articles = fetched
 
-# 2. DISPLAY LOGIC (Slices the 'all_articles' list based on 'visible_count')
-if st.session_state.all_articles:
+# 2. DISPLAY LOGIC (Only runs if search has been performed)
+if st.session_state.search_performed:
     
-    # We slice the master list: 0 to visible_count
-    visible_articles = st.session_state.all_articles[:st.session_state.visible_count]
+    total_found = len(st.session_state.all_articles)
     
-    # Display count
-    article_count_placeholder.markdown(f"<h3 style='font-size: 1rem !important; text-align: center; margin-top: 0px;'>ARTICLES FOUND: {len(st.session_state.all_articles)}</h3>", unsafe_allow_html=True)
-    
-    # Loop through ONLY the visible subset
-    for idx, art in enumerate(visible_articles):
-        with st.container():
-            st.markdown(f"### {idx+1}. {art['title']}")
-            
-            c1, c2 = st.columns([1, 5])
-            with c1: st.caption(f"📅 {format_date(art['publishedAt'])}")
-            with c2: st.caption(f"SOURCE: {art['source']['name'].upper()}")
-            
-            with st.expander("SHOW OVERVIEW"):
-                with st.spinner("DECRYPTING & ANALYZING..."):
-                    summary = extract_and_summarize(art['url'], google_api_key)
-                    st.markdown(summary)
-                    st.markdown(f"**[READ FULL SOURCE MATERIAL]({art['url']})**")
-            
-            st.markdown("<hr style='border-top: 2px solid black;'>", unsafe_allow_html=True)
+    if total_found == 0:
+        st.write("NO RECORDS FOUND.")
+        article_count_placeholder.markdown("**ARTICLES FOUND: 0**")
+    else:
+        # Show X of Y count
+        current_shown = min(st.session_state.visible_count, total_found)
+        article_count_placeholder.markdown(f"<h3 style='font-size: 1rem !important; text-align: center; margin-top: 0px;'>SHOWING {current_shown}/{total_found}</h3>", unsafe_allow_html=True)
 
-    # 3. LOAD MORE BUTTON
-    # If we have more articles in memory than we are currently showing
-    if st.session_state.visible_count < len(st.session_state.all_articles):
-        if st.button("LOAD NEXT 20 ARTICLES", use_container_width=True):
-            st.session_state.visible_count += 20
-            st.rerun() # Refresh page to show the larger slice
+        # Slice the list based on how many "Next" clicks have happened
+        visible_articles = st.session_state.all_articles[:st.session_state.visible_count]
+        
+        for idx, art in enumerate(visible_articles):
+            # Using key=idx ensures Streamlit knows which article is which and doesn't redraw incorrectly
+            with st.container():
+                st.markdown(f"### {idx+1}. {art['title']}")
+                
+                c1, c2 = st.columns([1, 5])
+                with c1: st.caption(f"📅 {format_date(art['publishedAt'])}")
+                with c2: st.caption(f"SOURCE: {art['source']['name'].upper()}")
+                
+                # Unique Key is CRITICAL for expanders in loops
+                with st.expander("SHOW OVERVIEW", expanded=False):
+                    with st.spinner("DECRYPTING & ANALYZING..."):
+                        summary = extract_and_summarize(art['url'], google_api_key)
+                        st.markdown(summary)
+                        st.markdown(f"**[READ FULL SOURCE MATERIAL]({art['url']})**")
+                
+                st.markdown("<hr style='border-top: 2px solid black;'>", unsafe_allow_html=True)
 
-elif search_pressed:
-    st.write("NO RECORDS FOUND.")
-    article_count_placeholder.markdown("**ARTICLES FOUND: 0**")
+        # 3. LOAD MORE BUTTON (Only if there are more to show)
+        if st.session_state.visible_count < total_found:
+            if st.button("LOAD NEXT 20 ARTICLES", use_container_width=True, key="load_more_btn"):
+                # Simply increase the limit. Streamlit will re-run the script, 
+                # but 'all_articles' remains in memory, so it just renders the larger slice.
+                st.session_state.visible_count += 20
+                st.rerun()
