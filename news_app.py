@@ -4,8 +4,18 @@ from newspaper import Article, Config
 from datetime import datetime
 
 # --- CONFIGURATION ---
-# "collapsed" ensures the sidebar is closed when the user loads the page
 st.set_page_config(page_title="Market Intelligence", layout="wide", initial_sidebar_state="collapsed")
+
+# --- SESSION STATE INITIALIZATION ---
+# We use this to track articles across button clicks (pagination)
+if 'articles' not in st.session_state:
+    st.session_state.articles = []
+if 'page' not in st.session_state:
+    st.session_state.page = 1
+if 'current_topic' not in st.session_state:
+    st.session_state.current_topic = ""
+if 'current_scope' not in st.session_state:
+    st.session_state.current_scope = "All Sources"
 
 # --- THE INTERCEPT STYLE CSS & GHOST MODE ---
 st.markdown("""
@@ -13,23 +23,16 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Merriweather:wght@300;400;700&display=swap');
 
     /* --- GHOST MODE: SIDEBAR TOGGLE --- */
-    /* We hide the button normally, but show it when you hover over the top-left corner */
     [data-testid="stSidebarCollapsedControl"] {
-        opacity: 0; /* Invisible by default */
+        opacity: 0; 
         transition: opacity 0.3s ease;
     }
-    
-    /* When mouse hovers over the button, make it fully visible */
     [data-testid="stSidebarCollapsedControl"]:hover {
         opacity: 1 !important;
         background-color: #f0f0f0;
     }
 
-    /* --- HIDE ONLY THE RAINBOW DECORATION --- */
-    /* This keeps the header (buttons) visible, but removes the colorful line */
-    [data-testid="stDecoration"] {
-        display: none;
-    }
+    [data-testid="stDecoration"] { display: none; }
 
     /* --- TYPOGRAPHY --- */
     h1, h2, h3 {
@@ -137,7 +140,6 @@ st.markdown("""
         border-top-right-radius: 0px;
     }
     
-    /* HIDE DEFAULT MENU & FOOTER */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
@@ -155,20 +157,23 @@ st.markdown("""
 
 # --- FUNCTIONS ---
 
-def fetch_news(api_key, topic, scope):
-    """Fetches top 20 news articles."""
+def fetch_news(api_key, topic, scope, page=1):
+    """
+    Fetches news. Supports pagination via 'page' parameter.
+    No diversity limits applied.
+    """
     base_url = "https://newsapi.org/v2/everything"
     
     params = {
         "q": topic,
         "sortBy": "publishedAt",
         "language": "en",
-        "pageSize": 20,
+        "pageSize": 20,     # Standard page size
+        "page": page,       # Current page number
         "apiKey": api_key
     }
 
     if scope == "Australian Sources":
-        # Updated Comprehensive AU Domains List
         au_domains_list = [
             "abc.net.au", "skynews.com.au", "news.com.au", "9news.com.au",
             "dailytelegraph.com.au", "smh.com.au", "theage.com.au", "sbs.com.au",
@@ -186,7 +191,6 @@ def fetch_news(api_key, topic, scope):
             "tweeddailynews.com.au", "northernstar.com.au", "dailymercury.com.au",
             "theguardian.com"
         ]
-        
         params["domains"] = ",".join(au_domains_list)
 
     try:
@@ -306,39 +310,79 @@ with opt2:
 
 st.markdown("---")
 
-# App Logic
+# --- LOGIC HANDLING ---
+
+# 1. NEW SEARCH: Resets everything
 if search_pressed:
     if not news_api_key or not google_api_key:
         st.warning("⚠️ ACCESS DENIED: KEYS NOT FOUND.")
     elif not topic:
         st.warning("⚠️ INPUT ERROR: PLEASE ENTER A TOPIC.")
     else:
+        # Reset Session State
+        st.session_state.page = 1
+        st.session_state.current_topic = topic
+        st.session_state.current_scope = source_scope
+        
         scope_text = "AUSTRALIAN WIRES" if source_scope == "Australian Sources" else "GLOBAL WIRES"
         
         with st.spinner(f"SCANNING {scope_text} FOR '{topic.upper()}'..."):
-            articles = fetch_news(news_api_key, topic, source_scope)
-        
-        if not articles:
-            st.write("NO RECORDS FOUND.")
-            article_count_placeholder.markdown("**ARTICLES FOUND: 0**")
-        else:
-            article_count_placeholder.markdown(f"<h3 style='font-size: 1rem !important; text-align: center; margin-top: 0px;'>ARTICLES FOUND: {len(articles)}</h3>", unsafe_allow_html=True)
+            new_articles = fetch_news(news_api_key, topic, source_scope, page=1)
+            st.session_state.articles = new_articles # Overwrite old list
 
-            for idx, art in enumerate(articles):
-                with st.container():
-                    st.markdown(f"### {art['title']}")
-                    
-                    c1, c2 = st.columns([1, 5])
-                    with c1:
-                        display_date = format_date(art['publishedAt'])
-                        st.caption(f"📅 {display_date}")
-                    with c2:
-                        st.caption(f"SOURCE: {art['source']['name'].upper()}")
-                    
-                    with st.expander("SHOW OVERVIEW"):
-                        with st.spinner("DECRYPTING & ANALYZING..."):
-                            summary = extract_and_summarize(art['url'], google_api_key)
-                            st.markdown(summary)
-                            st.markdown(f"**[READ FULL SOURCE MATERIAL]({art['url']})**")
-                    
-                    st.markdown("<hr style='border-top: 2px solid black;'>", unsafe_allow_html=True)
+# --- DISPLAY LOGIC ---
+# This runs on every re-load (both after search AND after load more)
+if st.session_state.articles:
+    
+    # Update Count
+    total_count = len(st.session_state.articles)
+    article_count_placeholder.markdown(f"<h3 style='font-size: 1rem !important; text-align: center; margin-top: 0px;'>ARTICLES LOADED: {total_count}</h3>", unsafe_allow_html=True)
+
+    # Loop through ALL articles in memory
+    for idx, art in enumerate(st.session_state.articles):
+        with st.container():
+            st.markdown(f"### {idx+1}. {art['title']}")
+            
+            c1, c2 = st.columns([1, 5])
+            with c1:
+                display_date = format_date(art['publishedAt'])
+                st.caption(f"📅 {display_date}")
+            with c2:
+                st.caption(f"SOURCE: {art['source']['name'].upper()}")
+            
+            with st.expander("SHOW OVERVIEW"):
+                # We use a unique key for spinners inside loops to avoid conflict
+                with st.spinner("DECRYPTING & ANALYZING..."):
+                    summary = extract_and_summarize(art['url'], google_api_key)
+                    st.markdown(summary)
+                    st.markdown(f"**[READ FULL SOURCE MATERIAL]({art['url']})**")
+            
+            st.markdown("<hr style='border-top: 2px solid black;'>", unsafe_allow_html=True)
+
+    # --- PAGINATION BUTTON ---
+    # Only show if we have articles and we have keys
+    if news_api_key and google_api_key:
+        if st.button("LOAD NEXT 20 ARTICLES", use_container_width=True):
+            # Increment Page
+            st.session_state.page += 1
+            
+            with st.spinner(f"FETCHING PAGE {st.session_state.page}..."):
+                # Fetch next batch
+                more_articles = fetch_news(
+                    news_api_key, 
+                    st.session_state.current_topic, 
+                    st.session_state.current_scope, 
+                    page=st.session_state.page
+                )
+                
+                if not more_articles:
+                    st.info("NO MORE ARTICLES FOUND.")
+                else:
+                    # Append to existing list
+                    st.session_state.articles.extend(more_articles)
+                    # Rerun to update the list immediately
+                    st.rerun()
+
+elif search_pressed: # If search was pressed but no articles returned
+    st.write("NO RECORDS FOUND.")
+    article_count_placeholder.markdown("**ARTICLES FOUND: 0**")
